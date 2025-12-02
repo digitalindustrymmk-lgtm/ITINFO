@@ -1,0 +1,131 @@
+import os
+import re
+import logging
+import asyncio
+from telegram import Update, ReplyKeyboardRemove
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+import firebase_admin
+from firebase_admin import credentials, db
+from keep_alive import keep_alive # Import មុខងារ 24h
+
+# --- CONFIGURATION ---
+TOKEN = '8284240201:AAGJD7lkK9QsFR9Iswp7dl9-tqkV4qFfUJI' # ដាក់ Token ថ្មីរបស់អ្នកនៅទីនេះ
+FIREBASE_KEY = 'serviceAccountKey.json' # ឈ្មោះឯកសារដែលបាន Download ពី Firebase
+DATABASE_URL = 'https://itinfo-8501a-default-rtdb.firebaseio.com/' # យក Link នេះពី Firebase Console -> Realtime Database
+
+# --- FIREBASE SETUP ---
+if not firebase_admin._apps:
+    cred = credentials.Certificate(FIREBASE_KEY)
+    firebase_admin.initialize_app(cred, {
+        'databaseURL': DATABASE_URL
+    })
+
+# --- LOGGING ---
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# --- STATES ---
+FULL_NAME, PROVINCE, PHONE = range(3)
+
+# --- START COMMAND ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.effective_user
+    
+    # ប្រមូលព័ត៌មានមូលដ្ឋាន
+    base_info = {
+        'telegram_id': user.id,
+        'username': user.username if user.username else "N/A",
+        'first_name': user.first_name,
+        'last_name': user.last_name if user.last_name else "",
+        'link': f"https://t.me/{user.username}" if user.username else "N/A",
+        'joined_at': str(update.message.date)
+    }
+
+    # រក្សាទុកក្នុង Firebase ភ្លាមៗ (Update បើមានស្រាប់)
+    ref = db.reference(f'users/{user.id}')
+    ref.update(base_info)
+
+    await update.message.reply_text(
+        f"សួស្តី {user.first_name}! 👋\nBot បានកត់ត្រាព័ត៌មាន Telegram របស់អ្នករួចរាល់។\n\n"
+        "ដើម្បីបញ្ចប់ការចុះឈ្មោះ សូមជួយបំពេញព័ត៌មានបន្ថែម៖\n\n"
+        "1️⃣ **សូមវាយឈ្មោះពេញរបស់អ្នក (ជាភាសាខ្មែរ)៖**",
+        parse_mode='Markdown'
+    )
+    return FULL_NAME
+
+# --- HANDLE FULL NAME ---
+async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    name_input = update.message.text
+
+    # Update Firebase
+    ref = db.reference(f'users/{user_id}')
+    ref.update({'khmer_name': name_input})
+
+    await update.message.reply_text("2️⃣ **តើអ្នកមកពីខេត្តណាដែរ?**")
+    return PROVINCE
+
+# --- HANDLE PROVINCE ---
+async def receive_province(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    province_input = update.message.text
+
+    ref = db.reference(f'users/{user_id}')
+    ref.update({'province': province_input})
+
+    await update.message.reply_text("3️⃣ **សូមវាយបញ្ចូលលេខទូរស័ព្ទរបស់អ្នក (ឧទាហរណ៍: 012345678)៖**")
+    return PHONE
+
+# --- HANDLE PHONE ---
+async def receive_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    phone_input = update.message.text
+
+    # Validate Phone Number (Cambodia format: 0xx or 855xx, 9-10 digits)
+    pattern = re.compile(r'^(0|\+855)?[1-9][0-9]{7,8}$')
+    
+    if not pattern.match(phone_input):
+        await update.message.reply_text("❌ លេខទូរស័ព្ទមិនត្រឹមត្រូវ។ សូមព្យាយាមម្តងទៀត (ឧទាហរណ៍: 012345678)៖")
+        return PHONE # សួរម្តងទៀត
+
+    ref = db.reference(f'users/{user_id}')
+    ref.update({'phone_number': phone_input, 'status': 'completed'})
+
+    await update.message.reply_text(
+        "✅ **ការចុះឈ្មោះជោគជ័យ!**\n\nទិន្នន័យរបស់អ្នកត្រូវបានរក្សាទុកក្នុងប្រព័ន្ធ។\nសូមអរគុណ!",
+        parse_mode='Markdown'
+    )
+    return ConversationHandler.END
+
+# --- CANCEL ---
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("ប្រតិបត្តិការត្រូវបានលុបចោល។ /start ដើម្បីចាប់ផ្តើមថ្មី។")
+    return ConversationHandler.END
+
+# --- MAIN FUNCTION ---
+def main():
+    # ដំណើរការ Web Server ដើម្បីកុំឱ្យ Render Sleep
+    keep_alive()
+
+    # បង្កើត Application
+    application = Application.builder().token(TOKEN).build()
+
+    # កំណត់លំហូរនៃការសន្ទនា (Conversation)
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            FULL_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_name)],
+            PROVINCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_province)],
+            PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_phone)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    application.add_handler(conv_handler)
+
+    # ដំណើរការ Bot
+    print("Bot is running...")
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()
