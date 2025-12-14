@@ -6,12 +6,12 @@ from telebot import types
 
 # --- Configuration ---
 # ដាក់ Token របស់ Bot អ្នកនៅទីនេះ
-BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN_HERE'
+BOT_TOKEN = '8284240201:AAFxNOZkvvSyrFma7J-zfAeXMj1aT5oeT9Q'
 
 # ភ្ជាប់ទៅ Firebase
 cred = credentials.Certificate("serviceAccountKey.json")
 firebase_admin.initialize_app(cred, {
-    'databaseURL': 'YOUR_FIREBASE_DATABASE_URL_HERE' 
+    'databaseURL': 'https://itinfo-8501a-default-rtdb.firebaseio.com/' 
     # ឧទាហរណ៍: https://your-project.firebasedatabase.app/
 })
 
