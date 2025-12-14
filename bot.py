@@ -2,21 +2,38 @@ import telebot
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import db
-from telebot import types
 
 # --- Configuration ---
 BOT_TOKEN = '8284240201:AAFxNOZkvvSyrFma7J-zfAeXMj1aT5oeT9Q'
 
-# ភ្ជាប់ទៅ Firebase
-if not firebase_admin._apps:
-    cred = credentials.Certificate("serviceAccountKey.json")
-    firebase_admin.initialize_app(cred, {
-        'databaseURL': 'https://itinfo-8501a-default-rtdb.firebaseio.com/' 
-    })
+# ==============================================================================
+#   ការភ្ជាប់ទៅកាន់ FIREBASE ទាំង ២ (DUAL CONNECTION)
+# ==============================================================================
+
+# 1. ភ្ជាប់ទៅ Master Firebase (សម្រាប់ផ្ទៀងផ្ទាត់ - Read Only)
+# សូមប្រើ key របស់ Database ដែលមានបញ្ជីឈ្មោះ (Image 2)
+master_cred = credentials.Certificate("master_key.json")
+master_app = firebase_admin.initialize_app(master_cred, {
+    'databaseURL': 'https://dilistname-default-rtdb.firebaseio.com/' # ដាក់ URL របស់ Database បញ្ជីឈ្មោះ
+}, name='master_app')
+
+# 2. ភ្ជាប់ទៅ Recording Firebase (សម្រាប់កត់ត្រា - Write)
+# សូមប្រើ key របស់ Database ថ្មីដែលចង់រក្សាទុក (Image 1)
+record_cred = credentials.Certificate("record_key.json")
+record_app = firebase_admin.initialize_app(record_cred, {
+    'databaseURL': 'https://itinfo-8501a-default-rtdb.firebaseio.com/' # ដាក់ URL របស់ Database កត់ត្រា
+}, name='record_app')
+
+# --- Database References ---
+
+# យោងតាមរូបភាពទី ២: Path គឺ 'students'
+MASTER_REF = db.reference('students', app=master_app)
+
+# យោងតាមរូបភាពទី ១: Path កត់ត្រាក៏ឈ្មោះ 'students' ដែរ
+RECORD_REF = db.reference('students', app=record_app)
+
 
 bot = telebot.TeleBot(BOT_TOKEN)
-
-# ឃ្លាំងផ្ទុកទិន្នន័យបណ្តោះអាសន្ន
 user_data = {}
 
 # --- Bot Logic ---
@@ -25,15 +42,12 @@ user_data = {}
 def send_welcome(message):
     user_id = message.from_user.id
     
-    # ទទួលព័ត៌មាន Telegram
+    # ចាប់យកព័ត៌មាន Telegram
     username = message.from_user.username
-    first_name = message.from_user.first_name
-    last_name = message.from_user.last_name if message.from_user.last_name else ""
-    full_telegram_name = f"{first_name} {last_name}".strip()
+    full_telegram_name = f"{message.from_user.first_name} {message.from_user.last_name or ''}".strip()
     telegram_link = f"https://t.me/{username}" if username else "No Link"
     username_text = f"@{username}" if username else "No Username"
 
-    # Save temp data
     user_data[user_id] = {
         "telegram_id": user_id,
         "telegram_name": full_telegram_name,
@@ -41,94 +55,94 @@ def send_welcome(message):
         "telegram_link": telegram_link
     }
 
-    msg = bot.reply_to(message, "សូមស្វាគមន៍! \nសូមវាយបញ្ចូល **អត្តលេខ ការងារ** របស់អ្នក៖\n(ឧទាហរណ៍: 001)")
-    bot.register_next_step_handler(msg, process_student_id)
+    msg = bot.reply_to(message, "❤️សូមស្វាគមន៍!បំពេញព័ត៌មានការងារ! \nសូមវាយបញ្ចូល **អត្តលេខ ការងាររបស់ប្អូន**ដើម្បីផ្ទៀងផ្ទាត់៖")
+    bot.register_next_step_handler(msg, verify_student_id_from_master)
 
-def process_student_id(message):
+def verify_student_id_from_master(message):
     try:
         user_id = message.from_user.id
-        student_id = message.text.strip()
+        input_id = message.text.strip() # អត្តលេខដែល User វាយ (ឧ. 111)
         
         if user_id not in user_data:
              bot.reply_to(message, "សូមចុច /start ម្តងទៀត។")
              return
 
-        # រក្សាទុក Student ID បណ្តោះអាសន្ន
-        user_data[user_id]['student_id'] = student_id
+        # ===============================================================
+        #  ជំហានទី ១: ឆែកមើលក្នុង MASTER DB (តាមរូបភាពទី ២)
+        # ===============================================================
+        # MASTER_REF ចង្អុលទៅ 'students'
+        # child(input_id) នឹងរត់ទៅរក Folder '111'
+        student_check = MASTER_REF.child(input_id).get()
+
+        if student_check is None:
+            bot.reply_to(message, f"❌ អត្តលេខ `{input_id}` របស់ប្អូនមិនមាននៅក្នុងបញ្ជីឈ្មោះគោលទេ។", parse_mode="Markdown")
+            return
         
-        # --- ត្រួតពិនិត្យទិន្នន័យស្ទួន (Check Duplicate) ---
-        ref = db.reference('students')
-        # ទាញយកទិន្នន័យតាមរយៈ ID ដែលបានបញ្ចូល
-        snapshot = ref.child(student_id).get()
+        # ទាញយកឈ្មោះពិតពី Master DB
+        # យោងតាមរូបភាពទី ២ Field ឈ្មោះគឺសរសេរថា "ឈ្មោះ"
+        real_name_in_master = student_check.get('ឈ្មោះ') 
         
-        if snapshot:
-            # ករណីមានទិន្នន័យរួចហើយ (Duplicate)
-            existing_name = snapshot.get('khmer_name', 'Unknown')
-            
-            # បង្កើតប៊ូតុង ជម្រើស
-            markup = types.InlineKeyboardMarkup()
-            btn_update = types.InlineKeyboardButton("📝 Update (កែប្រែ)", callback_data="cmd_update")
-            btn_cancel = types.InlineKeyboardButton("❌ Cancel (បោះបង់)", callback_data="cmd_cancel")
-            markup.add(btn_update, btn_cancel)
-            
-            text_warning = (
-                f"⚠️ **ជូនដំណឹង:** អត្តលេខ `{student_id}` នេះមានក្នុងប្រព័ន្ធរួចហើយ!\n"
-                f"👤 ឈ្មោះម្ចាស់ចាស់: **{existing_name}**\n\n"
-                "តើអ្នកចង់ធ្វើអ្វីបន្ត?"
-            )
-            bot.send_message(message.chat.id, text_warning, reply_markup=markup, parse_mode="Markdown")
-            
-        else:
-            # ករណីថ្មី (New User) -> ទៅសួរឈ្មោះខ្មែរតែម្តង
-            msg = bot.reply_to(message, "សូមវាយបញ្ចូល **ឈ្មោះពេញជាភាសាខ្មែរ** របស់អ្នក៖")
-            bot.register_next_step_handler(msg, process_khmer_name)
+        if not real_name_in_master:
+            # ការពារករណីមាន Folder តែអត់មាន Field ឈ្មោះ
+            bot.reply_to(message, "❌ រកឃើញអត្តលេខ តែទិន្នន័យឈ្មោះមិនពេញលេញ។")
+            return
+
+        # រក្សាទុកក្នុង Memory ដើម្បីផ្ទៀងផ្ទាត់ជំហានក្រោយ
+        user_data[user_id]['student_id'] = input_id
+        user_data[user_id]['expected_name'] = real_name_in_master 
+        
+        msg = bot.reply_to(message, f"✅ អត្តលេខត្រឹមត្រូវ។\nសូមវាយបញ្ចូល **ឈ្មោះពេញជាភាសាខ្មែរ** របស់ប្អូន៖")
+        bot.register_next_step_handler(msg, verify_name_and_save)
             
     except Exception as e:
-        bot.reply_to(message, f"Error: {e}")
+        bot.reply_to(message, f"Error Master DB: {e}")
 
-# --- Callback Handler សម្រាប់ប៊ូតុង Update / Cancel ---
-@bot.callback_query_handler(func=lambda call: True)
-def handle_query(call):
-    user_id = call.from_user.id
-    
-    if call.data == "cmd_cancel":
-        # ករណីបោះបង់
-        bot.answer_callback_query(call.id, "ប្រតិបត្តិការត្រូវបានបោះបង់")
-        bot.send_message(call.message.chat.id, "✅ អ្នកបានជ្រើសរើស **បោះបង់**។ សូមចុច /start ដើម្បីចាប់ផ្តើមថ្មី។")
-        # លុបទិន្នន័យបណ្តោះអាសន្ន
-        if user_id in user_data:
-            del user_data[user_id]
-
-    elif call.data == "cmd_update":
-        # ករណីចង់ Update (បន្តទៅសួរឈ្មោះ)
-        bot.answer_callback_query(call.id, "កំពុងដំណើរការ...")
-        msg = bot.send_message(call.message.chat.id, "សូមវាយបញ្ចូល **ឈ្មោះពេញជាភាសាខ្មែរ** ថ្មីរបស់អ្នក ដើម្បីធ្វើបច្ចុប្បន្នភាព៖")
-        bot.register_next_step_handler(msg, process_khmer_name)
-
-def process_khmer_name(message):
+def verify_name_and_save(message):
     try:
         user_id = message.from_user.id
-        khmer_name = message.text
+        input_name = message.text.strip()
         
         if user_id not in user_data:
-             bot.reply_to(message, "សូមចុច /start ម្តងទៀត។")
+             bot.reply_to(message, "សូមប្អូនចុច /start ម្តងទៀត។")
              return
 
-        # Update ឈ្មោះខ្មែរក្នុង Memory
-        user_data[user_id]['khmer_name'] = khmer_name
+        expected_name = user_data[user_id]['expected_name']
+
+        # ===============================================================
+        #  ជំហានទី ២: ផ្ទៀងផ្ទាត់ឈ្មោះ
+        # ===============================================================
+        # ប្រៀបធៀបឈ្មោះដែលវាយ ជាមួយឈ្មោះក្នុង Database ("ស៊ី ប៊ុនស៊ឹង")
+        if input_name != expected_name:
+            bot.reply_to(message, 
+                         f"❌ ឈ្មោះមិនត្រឹមត្រូវ!\n"
+                         f"អត្តលេខនេះត្រូវមានឈ្មោះ៖ **{expected_name}**\n"
+                         f"តែប្អូនវាយ៖ **{input_name}**\n\n"
+                         "សូមព្យាយាមម្តងទៀត។", parse_mode="Markdown")
+            return
+
+        # ===============================================================
+        #  ជំហានទី ៣: រក្សាទុកចូល RECORDING DB (តាមរូបភាពទី ១)
+        # ===============================================================
         
-        # Save to Firebase
         final_data = user_data[user_id]
+        
+        # លុប Field ដែលមិនចង់ Save
+        del final_data['expected_name'] 
+        
+        # យកឈ្មោះដែលត្រឹមត្រូវដាក់ចូល
+        final_data['khmer_name'] = expected_name 
+        
+        # ប្រើអត្តលេខជា Key សម្រាប់ Save
         student_key = final_data['student_id']
         
-        ref = db.reference('students')
-        ref.child(str(student_key)).set(final_data)
+        # Save ចូល Database ទី ១ (Recording)
+        RECORD_REF.child(str(student_key)).set(final_data)
         
         response_text = (
-            "✅ **រក្សាទុកជោគជ័យ!**\n\n"
+            "✅ **ប្អូនបានចុះឈ្មោះបានជោគជ័យ!**\n"
             f"👤 ឈ្មោះ: {final_data['khmer_name']}\n"
             f"🆔 អត្តលេខ: {final_data['student_id']}\n"
-            "ទិន្នន័យត្រូវបានធ្វើបច្ចុប្បន្នភាព។"
+            "❤️ទិន្នន័យរបស់ប្អូនត្រូវបានកត់ត្រា។"
         )
         bot.send_message(message.chat.id, response_text, parse_mode="Markdown")
         
@@ -136,8 +150,7 @@ def process_khmer_name(message):
         del user_data[user_id]
         
     except Exception as e:
-        bot.reply_to(message, f"Error Save: {str(e)}")
+        bot.reply_to(message, f"Error Recording DB: {str(e)}")
 
-# --- Run Bot ---
 print("Bot is running...")
 bot.infinity_polling()
