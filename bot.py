@@ -38,7 +38,6 @@ record_app = firebase_admin.initialize_app(record_cred, {
 # ==============================================================================
 #   DATABASE REFERENCES
 # ==============================================================================
-
 # យោងតាមរូបភាពទី ២: Path គឺ 'students' (សម្រាប់មើល)
 MASTER_REF = db.reference('students', app=master_app)
 
@@ -51,7 +50,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 user_data = {}
 
 # ==============================================================================
-#   BOT LOGIC
+#   4. BOT LOGIC
 # ==============================================================================
 
 @bot.message_handler(commands=['start'])
@@ -59,7 +58,7 @@ def send_welcome(message):
     try:
         user_id = message.from_user.id
         
-        # 1. ចាប់យកព័ត៌មាន Telegram ស្វ័យប្រវត្តិ
+        # ចាប់យកព័ត៌មាន Telegram ស្វ័យប្រវត្តិ
         username = message.from_user.username
         first_name = message.from_user.first_name
         last_name = message.from_user.last_name if message.from_user.last_name else ""
@@ -68,7 +67,7 @@ def send_welcome(message):
         telegram_link = f"https://t.me/{username}" if username else "No Link"
         username_text = f"@{username}" if username else "No Username"
 
-        # 2. រក្សាទុកក្នុង Memory ជាបណ្តោះអាសន្ន
+        # រក្សាទុកក្នុង Memory ជាបណ្តោះអាសន្ន
         user_data[user_id] = {
             "telegram_id": user_id,
             "telegram_name": full_telegram_name,
@@ -76,10 +75,10 @@ def send_welcome(message):
             "telegram_link": telegram_link
         }
 
-        msg = bot.reply_to(message, "❤️ **សូមស្វាគមន៍!**\n\nដើម្បីចុះឈ្មោះ សូមវាយបញ្ចូលអត្តលេខការងាររបស់ប្អូន៖", parse_mode="Markdown")
+        msg = bot.reply_to(message, "❤️ **សូមស្វាគមន៍!ការបំពេញព័ត៌មានការងារ**\n\nដើម្បីចាប់ផ្ដើមបំពេញព័ត៌មានសូមវាយបញ្ចូល **អត្តលេខការងារ** របស់ប្អូន៖", parse_mode="Markdown")
         bot.register_next_step_handler(msg, verify_student_id_from_master)
     except Exception as e:
-        bot.reply_to(message, "មានបញ្ហាបច្ចេកទេស។ សូមប្អូនព្យាយាមម្តងទៀត។")
+        bot.reply_to(message, "មានបញ្ហាបច្ចេកទេស។ សូមព្យាយាមម្តងទៀត។")
 
 def verify_student_id_from_master(message):
     try:
@@ -92,15 +91,16 @@ def verify_student_id_from_master(message):
              return
 
         # ---------------------------------------------------------
-        #  PHASE 1: SECURITY CHECK (ឆែកម្ចាស់គណនីក្នុង RECORD DB)
+        #  PHASE 1: SECURITY CHECK (ឆែកមើលក្នុង RECORD DB)
         # ---------------------------------------------------------
+        # ឆែកមើលថាតើអត្តលេខនេះធ្លាប់ចុះឈ្មោះរួចឬនៅ?
         existing_record = RECORD_REF.child(input_id).get()
 
         if existing_record:
             # បើមានទិន្នន័យចាស់ -> យក Telegram ID ចាស់មកផ្ទៀងផ្ទាត់
             registered_telegram_id = existing_record.get('telegram_id')
             
-            # បើ ID មិនដូចគ្នា -> បិទការកែប្រែភ្លាម
+            # បើ ID មិនដូចគ្នា (មានន័យថាគេយកគណនីថ្មីមកកែទិន្នន័យចាស់)
             if str(registered_telegram_id) != str(user_id):
                 error_text = (
                     f"⛔️ **មិនអនុញ្ញាតឱ្យកែប្រែ!**\n\n"
@@ -109,7 +109,11 @@ def verify_student_id_from_master(message):
                     "👉 **សូមទាក់ទង Admin ដើម្បីដោះស្រាយ។**"
                 )
                 bot.reply_to(message, error_text, parse_mode="Markdown")
-                return # បញ្ចប់ (Stop)
+                
+                # [FIX] សួររកអត្តលេខថ្មីភ្លាមៗ ដើម្បីកុំឱ្យគាំង
+                msg = bot.send_message(message.chat.id, "🔄 **សូមវាយបញ្ចូលអត្តលេខផ្សេងទៀត ដើម្បីសាកល្បង៖**", parse_mode="Markdown")
+                bot.register_next_step_handler(msg, verify_student_id_from_master) 
+                return 
 
         # ---------------------------------------------------------
         #  PHASE 2: VERIFICATION (ឆែកបញ្ជីឈ្មោះក្នុង MASTER DB)
@@ -117,8 +121,8 @@ def verify_student_id_from_master(message):
         student_check = MASTER_REF.child(input_id).get()
 
         if student_check is None:
-            # បើខុស: Loop សួរម្តងទៀត
-            msg = bot.reply_to(message, f"❌ អត្តលេខ `{input_id}` មិនត្រឹមត្រូវទេ។\nសូមប្អូនព្យាយាមវាយ **អត្តលេខ** ម្តងទៀត៖", parse_mode="Markdown")
+            # [FIX] បើអត្តលេខខុស ឱ្យវាចាំទទួលទៀត
+            msg = bot.reply_to(message, f"❌ អត្តលេខ `{input_id}` មិនមាននៅក្នុងបញ្ជីឈ្មោះគោលទេ។\nសូមប្អូនព្យាយាមវាយ **អត្តលេខ** ម្តងទៀត៖", parse_mode="Markdown")
             bot.register_next_step_handler(msg, verify_student_id_from_master)
             return
         
@@ -126,18 +130,20 @@ def verify_student_id_from_master(message):
         real_name_in_master = student_check.get('ឈ្មោះ') 
         
         if not real_name_in_master:
-            msg = bot.reply_to(message, "❌ អត្តលេខនេះមានបញ្ហាបច្ចេកទេស (គ្មានឈ្មោះក្នុងបញ្ជី)។ សូមទាក់ទង Admin។")
+            msg = bot.reply_to(message, "❌ អត្តលេខនេះមានបញ្ហាបច្ចេកទេស (គ្មានឈ្មោះក្នុងបញ្ជី)។ សូមទាក់ទង Admin!")
+            bot.register_next_step_handler(msg, verify_student_id_from_master)
             return
 
-        # ត្រឹមត្រូវ -> រក្សាទុកក្នុង Memory
+        # បើអ្វីៗត្រឹមត្រូវ -> រក្សាទុកក្នុង Memory ហើយទៅជំហានបន្ទាប់
         user_data[user_id]['student_id'] = input_id
         user_data[user_id]['expected_name'] = real_name_in_master 
         
-        msg = bot.reply_to(message, f"✅ អត្តលេខត្រឹមត្រូវ។\nសូមវាយបញ្ចូល **ឈ្មោះពេញជាភាសាខ្មែរ** របស់អ្នក៖")
+        msg = bot.reply_to(message, f"✅ អត្តលេខត្រឹមត្រូវ។\nសូមវាយបញ្ចូល **ឈ្មោះពេញជាភាសាខ្មែរ** របស់ប្អូន៖")
         bot.register_next_step_handler(msg, verify_name_and_save)
             
     except Exception as e:
-        msg = bot.reply_to(message, f"Error: {e}\nសូមវាយអត្តលេខម្តងទៀត៖")
+        # [FIX] Error ក៏ត្រូវឱ្យវាចាំទទួលសារដែរ
+        msg = bot.reply_to(message, f"⚠️ Error: {e}\nសូមប្អូនព្យាយាមវាយអត្តលេខម្តងទៀត៖")
         bot.register_next_step_handler(msg, verify_student_id_from_master)
 
 def verify_name_and_save(message):
@@ -155,11 +161,11 @@ def verify_name_and_save(message):
         #  PHASE 3: NAME VALIDATION (ផ្ទៀងផ្ទាត់ឈ្មោះ)
         # ---------------------------------------------------------
         if input_name != expected_name:
-            # បើខុស: Loop សួរម្តងទៀត
+            # [FIX] បើឈ្មោះខុស ឱ្យវាចាំទទួលឈ្មោះម្តងទៀត
             msg = bot.reply_to(message, 
-                         f"❌ ឈ្មោះមិនត្រឹមត្រូវ!\n"         
-                         f"ប្អូនបានវាយ៖ **{input_name}** \n\n"
-                         "សូមវាយ **ឈ្មោះពេញជាភាសាខ្មែរ** របស់ប្អូនម្តងទៀតឱ្យបានត្រឹមត្រូវ៖", parse_mode="Markdown")
+                         f"❌ ឈ្មោះមិនត្រឹមត្រូវ!\n"
+                         f"ប្អូនបានវាយ៖ **{input_name}**\n\n"
+                         "សូមវាយ **ឈ្មោះ** របស់ប្អូនម្តងទៀតឱ្យបានត្រឹមត្រូវ! សូមពិនិត្យសូមសរសេរដកឃ្លាផងរវាងគោត្តនាម និងនាម៖", parse_mode="Markdown")
             bot.register_next_step_handler(msg, verify_name_and_save)
             return
 
@@ -180,11 +186,10 @@ def verify_name_and_save(message):
         RECORD_REF.child(str(student_key)).set(final_data)
         
         response_text = (
-            "✅ **❤️ចុះឈ្មោះបានជោគជ័យ!**\n\n"
-            f"👤 ឈ្មោះ: {final_data['khmer_name']}\n"
+            "✅ **ចុះឈ្មោះបានជោគជ័យ!**\n\n"
+            f"👤 ឈ្មោះ: ❤️ {final_data['khmer_name']}\n"
             f"🆔 អត្តលេខ: {final_data['student_id']}\n"
-            f"🔗 Telegram: {final_data['telegram_link']}\n\n"
-            "ទិន្នន័យរបស់ប្អូនត្រូវបានកត់ត្រាទុកក្នុងប្រព័ន្ធ។ \n\n❤️សូមអរគុណសម្រាប់ផ្ដល់ព័ត៌មានរបស់ប្អូន!"
+            "ទិន្នន័យរបស់ប្អូនត្រូវបានកត់ត្រាទុកក្នុងប្រព័ន្ធ។"
         )
         bot.send_message(message.chat.id, response_text, parse_mode="Markdown")
         
