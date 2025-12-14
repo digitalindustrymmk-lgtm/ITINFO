@@ -19,7 +19,7 @@ master_app = firebase_admin.initialize_app(master_cred, {
 
 # 2. ភ្ជាប់ទៅ Recording Firebase (សម្រាប់កត់ត្រា - Write)
 # សូមប្រើ key របស់ Database ថ្មីដែលចង់រក្សាទុក (Image 1)
-record_cred = credentials.Certificate("record_key.json")
+record_cred = credentials.Certificate("serviceAccountKey.json")
 record_app = firebase_admin.initialize_app(record_cred, {
     'databaseURL': 'https://itinfo-8501a-default-rtdb.firebaseio.com/'
 }, name='record_app')
