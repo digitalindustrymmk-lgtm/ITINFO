@@ -22,7 +22,7 @@ RECORDING_DB_URL = 'https://itinfo-8501a-default-rtdb.firebaseio.com/'
 # ដាក់ Email របស់អ្នកដែលត្រូវប្រើសម្រាប់ផ្ញើ OTP
 SENDER_EMAIL = "perdigitalindustry@gmail.com" 
 # ដាក់ App Password (16 ខ្ទង់) ដែលបានបង្កើតពី Google Account (មិនមែន Password ចូល Gmail ទេ)
-SENDER_PASSWORD = "crqc lytk oyoi jxwd" 
+SENDER_PASSWORD = "crqclytkoyoijxwd" 
 
 # ==============================================================================
 #   2. ការភ្ជាប់ FIREBASE (CONNECTION)
