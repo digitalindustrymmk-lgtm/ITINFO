@@ -1,4 +1,2 @@
-python-telegram-bot
+pyTelegramBotAPI
 firebase-admin
-flask
-gunicorn
