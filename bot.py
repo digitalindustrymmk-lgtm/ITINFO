@@ -41,7 +41,7 @@ def send_welcome(message):
         "telegram_link": telegram_link
     }
 
-    msg = bot.reply_to(message, "សូមស្វាគមន៍! \nសូមវាយបញ្ចូល **អត្តលេខ** (Student ID) របស់អ្នក៖\n(ឧទាហរណ៍: 9090)")
+    msg = bot.reply_to(message, "សូមស្វាគមន៍! \nសូមវាយបញ្ចូល **អត្តលេខ ការងារ** របស់អ្នក៖\n(ឧទាហរណ៍: 001)")
     bot.register_next_step_handler(msg, process_student_id)
 
 def process_student_id(message):
